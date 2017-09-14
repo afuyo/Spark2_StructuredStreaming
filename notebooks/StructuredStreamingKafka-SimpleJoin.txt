@@ -1,0 +1,245 @@
+
+%%configure -f
+{
+"conf": {
+"spark.jars.packages": "org.apache.spark:spark-sql-kafka-0-10_2.11:2.1.0",
+"spark.jars.excludes": "org.scala-lang:scala-reflect,org.apache.spark:spark-tags_2.11"
+}
+} 
+
+spark
+
+
+%%sh
+KAFKAZKHOSTS=zk0-sparkj.jykta0xle2jefn4g2nliyati2h.cx.internal.cloudapp.net:2181,zk1-sparkj.jykta0xle2jefn4g2nliyati2h.cx.internal.cloudapp.net:2181,zk2-sparkj.jykta0xle2jefn4g2nliyati2h.cx.internal.cloudapp.net:2181
+KAFKAHOME=/usr/hdp/current/kafka_2.11-0.11.0.0
+$KAFKAHOME/bin/kafka-topics.sh --create --replication-factor 1 --partitions 4 --topic test4 --zookeeper $KAFKAZKHOSTS
+
+%%sh
+KAFKAZKHOSTS=zk0-sparkj.jykta0xle2jefn4g2nliyati2h.cx.internal.cloudapp.net:2181,zk1-sparkj.jykta0xle2jefn4g2nliyati2h.cx.internal.cloudapp.net:2181,zk2-sparkj.jykta0xle2jefn4g2nliyati2h.cx.internal.cloudapp.net:2181
+KAFKAHOME=/usr/hdp/current/kafka_2.11-0.11.0.0
+$KAFKAHOME/bin/kafka-topics.sh --create --replication-factor 1 --partitions 2 --topic test4join --zookeeper $KAFKAZKHOSTS
+
+%%sh
+KAFKAZKHOSTS=zk0-sparkj.jykta0xle2jefn4g2nliyati2h.cx.internal.cloudapp.net:2181,zk1-sparkj.jykta0xle2jefn4g2nliyati2h.cx.internal.cloudapp.net:2181,zk2-sparkj.jykta0xle2jefn4g2nliyati2h.cx.internal.cloudapp.net:2181
+KAFKAHOME=/usr/hdp/current/kafka_2.11-0.11.0.0
+$KAFKAHOME/bin/kafka-topics.sh --list  --zookeeper $KAFKAZKHOSTS
+
+// The Kafka topic used to write, and then read from
+val topic="test4"
+val topic2="test4join"
+// The Zookeeper hosts for the Kafka cluster. This is used when reading from Kafka
+val kafkaZkHosts="zk0-sparkj.jykta0xle2jefn4g2nliyati2h.cx.internal.cloudapp.net:2181,zk1-sparkj.jykta0xle2jefn4g2nliyati2h.cx.internal.cloudapp.net:2181,zk2-sparkj.jykta0xle2jefn4g2nliyati2h.cx.internal.cloudapp.net:2181"
+// The Kafka broker hosts for the Kafka cluster
+val kafkaBrokers="hn0-sparkj.jykta0xle2jefn4g2nliyati2h.cx.internal.cloudapp.net:9092"
+// The consumer group used when reading from kafka
+val group="mygroup"
+// Create a map containing the topic name and how many consumer threads to create when reading
+val topicMap = Map(topic -> 5)
+// The batching interval when reading from Kafka
+val batchInterval = 2
+
+// The number of messages to write to the Kafka topic
+val numMsgs = 1000
+// Sentences that will be randomly written to Kafka
+
+topic
+
+import org.apache.spark.sql.functions.{explode, split}
+
+// Setup connection to Kafka
+val readKafka = spark.readStream.
+  format("kafka").
+  option("kafka.bootstrap.servers", kafkaBrokers).   // comma separated list of broker:host
+  option("subscribe", topic).    // comma separated list of topics
+  option("startingOffsets", "latest"). // read data from the end of the stream
+  load()
+
+// split lines by whitespace and explode the array as rows of `word`
+val wordsKafka = readKafka.select(explode(split($"value".cast("string"), "\\s+")).as("word")).
+  groupBy($"word").
+  count
+
+val queryKafka =
+  wordsKafka.
+    writeStream.
+    format("memory").        // memory = store in-memory table (for testing only in Spark 2.0)
+    queryName("countsAgg").     // counts = name of the in-memory table
+    outputMode("complete").  // complete = all the counts should be in the table
+    start()
+
+%%sql 
+select * from countsAgg
+
+//using avrotest file
+import org.apache.spark.sql.types._
+val jsonSchema = new StructType().add("f1",StringType)
+
+//Schema for DataBricks example
+import org.apache.spark.sql.types._
+val jsonSchema = new StructType().add("time",TimestampType).add("action", StringType)
+
+import org.apache.spark.sql.functions._
+val streammingInputDF2 = spark.
+readStream.format("kafka").
+option("kafka.bootstrap.servers",kafkaBrokers).
+option("subscribe",topic).option("startingOffsets","earliest").
+load()
+
+import org.apache.spark.sql.functions._
+import org.apache.spark.sql.streaming.ProcessingTime
+import org.apache.spark.sql.streaming.OutputMode
+
+
+val streammingInputDF6 = spark.readStream.format("kafka").
+option("kafka.bootstrap.servers",kafkaBrokers).
+option("subscribe",topic).option("startingOffsets","earliest").
+load.
+select($"key" cast "string", $"value" cast "string").as[(String,String)].
+writeStream.
+option("checkpointLocation","/HdiSamples/").
+trigger(ProcessingTime(2)).
+queryName("counts3").
+outputMode(OutputMode.Append).
+format("memory").
+start
+
+//streammingInputDF5.processAllAvailable()
+
+streammingInputDF6.status
+
+spark.table("counts3").show()
+
+%%sql 
+select *
+from counts3 where value='rule'
+
+%%sql 
+select count(*)
+from counts3 where value='rule'
+
+import org.apache.spark.sql.functions._
+import org.apache.spark.sql.streaming.ProcessingTime
+import org.apache.spark.sql.streaming.OutputMode
+
+
+val streammingInputDF7 = spark.readStream.format("kafka").
+option("kafka.bootstrap.servers",kafkaBrokers).
+option("subscribe",topic2).option("startingOffsets","latest").
+load.
+select($"key" cast "string", $"value" cast "string").as[(String,String)].
+writeStream.
+option("checkpointLocation","/HdiSamples/offset2").
+trigger(ProcessingTime(2)).
+queryName("counts12").
+outputMode(OutputMode.Append).
+format("memory").
+start
+
+//streammingInputDF5.processAllAvailable()
+
+spark.table("counts12").show()
+
+spark.table("counts12").show()
+
+%%sql 
+select counts12.value from counts12, counts3 where counts12.value=counts3.value and counts3.value='rule'
+
+### yet another message arrives
+
+spark.table("counts12").show()
+
+%%sql 
+select counts12.value from counts12, counts3 where counts12.value=counts3.value and counts3.value='rule'
+
+//Schema for DataBricks example
+import org.apache.spark.sql.types._
+val jsonSchema = new StructType().add("time",TimestampType).add("action", StringType)
+
+import org.apache.spark.sql.functions._
+import org.apache.spark.sql.streaming.ProcessingTime
+import org.apache.spark.sql.streaming.OutputMode
+
+
+val streammingBricks = spark.readStream.format("kafka").
+option("kafka.bootstrap.servers",kafkaBrokers).
+option("subscribe",topic2).option("startingOffsets","earliest").
+//schema(jsonSchema).Kafka source has a fixed schema and cannot be set with a custom one
+load.
+select($"key" cast "string", $"value" cast "string").as[(String,String)].
+writeStream.
+//option("checkpointLocation","/HdiSamples/").
+trigger(ProcessingTime(2)).
+queryName("counts7").
+outputMode(OutputMode.Append).
+format("memory").
+start
+
+//streammingInputDF5.processAllAvailable()
+
+streammingBricks.status
+
+spark.table("counts7").show(5)
+
+val temp=spark.table("counts7")
+
+temp.show(5)
+
+temp.select("value").
+write.
+format("json").
+save("wasbs:///HdiSamples/databrick")
+
+//val jsonDF=spark.read.json("wasbs:///HdiSamples/databrick/*.json")
+val jsonDF2=spark.read.format("text").load("wasbs:///HdiSamples/databrick/*.json")
+
+jsonDF2.show(5)
+
+jsonDF.show(5)
+
+val vls = jsonDF.select("value").collect()
+
+val s=vls(1).getString(0)
+
+s(0)
+
+
+import org.json4s.{DefaultFormats, MappingException}
+import org.json4s.jackson.JsonMethods._
+import org.apache.spark.sql.functions._
+
+def getJsonKey(jsonstring: String): (String) = {
+    implicit val formats = DefaultFormats
+    val parsedJson = parse(jsonstring)  
+    val key = (parsedJson \ "time").extract[String]
+    key
+}
+val getJsonKeyUDF = udf((jsonstring: String) => getJsonKey(jsonstring))
+
+
+val newDF = jsonDF.withColumn("key", getJsonKeyUDF(jsonDF("value"))).withColumn("json", jsonDF("value")).select("key", "json")
+newDF.show
+
+val array = new Array[String](3)
+array(0)=vls(1).getString(0)
+array(1)= vls(2).getString(0)
+array(2)= vls(3).getString(0)
+array.take(1)
+
+val events = sc.parallelize(
+  """{"action":"create","timestamp":1452121277}""" ::
+  """{"action":"create","timestamp":"1452121277"}""" ::
+  """{"action":"create","timestamp":""}""" ::
+  """{"action":"create","timestamp":null}""" ::
+  """{"action":"create","timestamp":"null"}""" ::
+  Nil
+)
+
+
+events.take(1)
+
+import org.apache.spark.sql.types._
+
+val schema = (new StructType).add("action", StringType).add("timestamp", LongType)
+
+val test2= spark.read.schema(schema).json(events).show
